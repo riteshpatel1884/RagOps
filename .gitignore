@@ -1,0 +1,9 @@
+__pycache__/
+*.pyc
+.venv/
+backend/.env
+backend/uploads/
+backend/qdrant_data/
+node_modules/
+frontend/.next/
+.DS_Store

@@ -1,0 +1,31 @@
+version: "3.9"
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ragops
+      POSTGRES_PASSWORD: ragops
+      POSTGRES_DB: ragops
+    ports:
+      - "5432:5432"
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+
+  # Not required for Phase 0/1 — qdrant-client runs embedded (file-backed) by
+  # default via QDRANT_PATH. Uncomment when you move to a real Qdrant server
+  # (Phase 17, production backend) and set QDRANT_PATH to this URL instead.
+  # qdrant:
+  #   image: qdrant/qdrant:latest
+  #   ports:
+  #     - "6333:6333"
+  #   volumes:
+  #     - qdrant_data:/qdrant/storage
+
+volumes:
+  pg_data:

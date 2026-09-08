@@ -1,0 +1,26 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+body {
+  background-color: #0b0e14;
+  color: #e4e7ee;
+}
+
+::selection {
+  background-color: #4a4f8c;
+  color: #ffffff;
+}
+
+/* thin, quiet scrollbars fit the dense-table aesthetic */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: #232838;
+  border-radius: 4px;
+}
