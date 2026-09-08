@@ -1,5 +1,9 @@
-"""Answer generation over retrieved context, using the Anthropic API."""
-import anthropic
+"""Answer generation over retrieved context, via LangChain's ChatGroq wrapped
+in a small LCEL chain (prompt | llm | output parser)."""
+from langchain_core.documents import Document
+from langchain_core.output_parsers import StrOutputParser
+from langchain_core.prompts import ChatPromptTemplate
+from langchain_groq import ChatGroq
 
 from app.core.config import get_settings
 
@@ -14,37 +18,45 @@ Rules:
 - Be concise and directly answer the question first, with brief supporting detail after.
 """
 
+PROMPT = ChatPromptTemplate.from_messages(
+    [
+        ("system", SYSTEM_PROMPT),
+        ("human", "Context:\n{context}\n\nQuestion: {question}"),
+    ]
+)
 
-def build_context_block(chunks: list[dict]) -> str:
+# Pipeline Builder's "LLM" dropdown pulls from this list — add/remove Groq
+# model names here and they show up there automatically.
+#
+# NOTE: llama-3.3-70b-versatile / llama-3.1-8b-instant now show as
+# "Enterprise" (contact-sales) on Groq's production models list — a normal
+# API key gets a 404 on those. openai/gpt-oss-* are the current models with
+# regular per-token pricing available on a standard Groq key. If Groq's
+# lineup changes again, check https://console.groq.com/docs/models and swap
+# the list below — nothing else in the app needs to change.
+AVAILABLE_LLMS = [
+    "openai/gpt-oss-120b",
+    "openai/gpt-oss-20b",
+]
+
+
+def build_context_block(chunks: list[Document]) -> str:
     parts = []
     for i, c in enumerate(chunks, start=1):
         # parent_child chunking retrieves on the small child chunk (precision)
         # but sends the larger parent chunk to the LLM as context (recall).
-        text = c.get("parent_text") or c["text"]
-        parts.append(f"[Source {i} — {c['filename']} p.{c['page_number']}]\n{text}")
+        text = c.metadata.get("parent_text") or c.page_content
+        parts.append(f"[Source {i} — {c.metadata.get('filename')} p.{c.metadata.get('page_number')}]\n{text}")
     return "\n\n".join(parts)
 
 
-AVAILABLE_LLMS = ["claude-sonnet-4-6", "claude-haiku-4-5-20251001", "claude-opus-5"]
-
-
-def generate_answer(question: str, chunks: list[dict], model: str | None = None) -> str:
-    if not settings.anthropic_api_key:
+def generate_answer(question: str, chunks: list[Document], model: str | None = None) -> str:
+    if not settings.groq_api_key:
         return (
-            "[No ANTHROPIC_API_KEY configured — set it in backend/.env to enable generation. "
+            "[No GROQ_API_KEY configured — set it in backend/.env to enable generation. "
             "Retrieval below is still real.]"
         )
-    client = anthropic.Anthropic(api_key=settings.anthropic_api_key)
-    context = build_context_block(chunks)
-    message = client.messages.create(
-        model=model or settings.anthropic_model,
-        max_tokens=800,
-        system=SYSTEM_PROMPT,
-        messages=[
-            {
-                "role": "user",
-                "content": f"Context:\n{context}\n\nQuestion: {question}",
-            }
-        ],
-    )
-    return "".join(block.text for block in message.content if block.type == "text")
+
+    llm = ChatGroq(api_key=settings.groq_api_key, model=model or settings.groq_model, max_tokens=800)
+    chain = PROMPT | llm | StrOutputParser()
+    return chain.invoke({"context": build_context_block(chunks), "question": question})

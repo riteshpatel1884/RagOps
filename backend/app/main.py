@@ -23,7 +23,7 @@ def _seed_default_pipeline():
                     embedding_model="local-tfidf-384",
                     retriever_type="hybrid",
                     reranker_type="none",
-                    llm_model="claude-sonnet-4-6",
+                    llm_model="llama-3.3-70b-versatile",
                     top_k=5,
                 )
             )

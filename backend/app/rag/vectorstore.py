@@ -1,25 +1,32 @@
-"""Thin wrapper around Qdrant, running in local (embedded, file-backed) mode
-so no Docker/Qdrant server is required. Point QDRANT_PATH at a real Qdrant
-server URL later (Phase 17) without changing calling code.
+"""Vector store via LangChain's QdrantVectorStore, still backed by
+qdrant-client in the same local-embedded/Qdrant-Cloud dual mode as before
+(QDRANT_URL set -> cloud; unset -> local file-backed, no server needed).
 
-Phase 2: one collection per embedding model (dimensions differ per model,
-and a single collection can only hold one vector size), named
-"{qdrant_collection}__{embedder_name}".
+One collection per embedding model (dimensions can differ per model), named
+"{qdrant_collection}__{embedder_name}". Metadata is filterable via
+"metadata.<key>" field paths (that's where langchain_qdrant stores it).
 """
+from langchain_core.documents import Document
+from langchain_qdrant import QdrantVectorStore
 from qdrant_client import QdrantClient
 from qdrant_client.http import models as qm
 
 from app.core.config import get_settings
+from app.rag.embeddings import get_dimensions, get_langchain_embeddings
 
 settings = get_settings()
 
 _client: QdrantClient | None = None
+_stores: dict[str, QdrantVectorStore] = {}
 
 
 def get_client() -> QdrantClient:
     global _client
     if _client is None:
-        _client = QdrantClient(path=settings.qdrant_path)
+        if settings.qdrant_url:
+            _client = QdrantClient(url=settings.qdrant_url, api_key=settings.qdrant_api_key or None)
+        else:
+            _client = QdrantClient(path=settings.qdrant_path)
     return _client
 
 
@@ -27,55 +34,35 @@ def collection_name(embedder_name: str) -> str:
     return f"{settings.qdrant_collection}__{embedder_name}"
 
 
-def ensure_collection(embedder_name: str, dimensions: int) -> str:
-    client = get_client()
-    name = collection_name(embedder_name)
+def _ensure_collection(client: QdrantClient, name: str, dimensions: int) -> None:
     existing = [c.name for c in client.get_collections().collections]
     if name not in existing:
         client.create_collection(
             collection_name=name,
             vectors_config=qm.VectorParams(size=dimensions, distance=qm.Distance.COSINE),
         )
-    return name
 
 
-def upsert_chunks(
-    embedder_name: str, chunk_ids: list[str], vectors: list[list[float]], payloads: list[dict]
-) -> None:
-    client = get_client()
-    client.upsert(
-        collection_name=collection_name(embedder_name),
-        points=qm.Batch(ids=chunk_ids, vectors=vectors, payloads=payloads),
+def get_store(embedder_name: str) -> QdrantVectorStore:
+    if embedder_name not in _stores:
+        client = get_client()
+        name = collection_name(embedder_name)
+        _ensure_collection(client, name, get_dimensions(embedder_name))
+        _stores[embedder_name] = QdrantVectorStore(
+            client=client,
+            collection_name=name,
+            embedding=get_langchain_embeddings(embedder_name),
+        )
+    return _stores[embedder_name]
+
+
+def add_documents(embedder_name: str, documents: list[Document], ids: list[str]) -> None:
+    if not documents:
+        return
+    get_store(embedder_name).add_documents(documents, ids=ids)
+
+
+def document_id_filter(document_id: str) -> qm.Filter:
+    return qm.Filter(
+        must=[qm.FieldCondition(key="metadata.document_id", match=qm.MatchValue(value=document_id))]
     )
-
-
-def search(
-    embedder_name: str, vector: list[float], top_k: int = 5, document_id: str | None = None
-) -> list[dict]:
-    client = get_client()
-    query_filter = None
-    if document_id:
-        query_filter = qm.Filter(
-            must=[qm.FieldCondition(key="document_id", match=qm.MatchValue(value=document_id))]
-        )
-    try:
-        results = client.search(
-            collection_name=collection_name(embedder_name),
-            query_vector=vector,
-            limit=top_k,
-            query_filter=query_filter,
-        )
-    except Exception:
-        return []  # collection doesn't exist yet — nothing indexed for this embedder
-    return [
-        {
-            "chunk_id": r.id,
-            "score": r.score,
-            "text": r.payload.get("text"),
-            "document_id": r.payload.get("document_id"),
-            "filename": r.payload.get("filename"),
-            "page_number": r.payload.get("page_number"),
-            "parent_text": r.payload.get("parent_text"),
-        }
-        for r in results
-    ]

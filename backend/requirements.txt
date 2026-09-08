@@ -9,5 +9,14 @@ pypdf
 qdrant-client
 scikit-learn
 numpy
-anthropic
 python-dotenv
+rank-bm25
+
+# LangChain
+langchain-core
+langchain-text-splitters
+langchain-community
+langchain-classic
+langchain-qdrant
+langchain-experimental
+langchain-groq

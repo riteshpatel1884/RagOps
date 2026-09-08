@@ -1,69 +1,56 @@
-"""Phase 2 retrieval strategies: bm25, dense, hybrid.
+"""Phase 2 retrieval strategies via LangChain retrievers: bm25, dense, hybrid.
 
-BM25 index is rebuilt from Postgres on every query — fine at demo/portfolio
-scale (hundreds to low-thousands of chunks). At real scale you'd persist an
-inverted index (e.g. via Qdrant's sparse vectors, or Elasticsearch)
-alongside the dense one instead of rebuilding it per request.
+BM25Retriever's in-memory index is rebuilt from Postgres on every query —
+fine at demo/portfolio scale (hundreds to low-thousands of chunks). At real
+scale you'd persist an inverted index instead of rebuilding it per request.
 """
-import re
-
-from rank_bm25 import BM25Okapi
+from langchain_classic.retrievers import EnsembleRetriever
+from langchain_community.retrievers import BM25Retriever
+from langchain_core.documents import Document
 from sqlalchemy.orm import Session
 
-from app.models.document import Chunk, Document
+from app.models.document import Chunk
+from app.models.document import Document as DocumentModel
 from app.rag import vectorstore
-from app.rag.embeddings import get_embedder
-
-_TOKEN_RE = re.compile(r"[a-z0-9]+")
 
 
-def _tokenize(text: str) -> list[str]:
-    return _TOKEN_RE.findall(text.lower())
-
-
-def _chunk_rows(db: Session, document_id: str | None = None) -> list[tuple[Chunk, Document]]:
-    q = db.query(Chunk, Document).join(Document, Chunk.document_id == Document.id)
+def _chunk_documents(db: Session, document_id: str | None = None) -> list[Document]:
+    q = db.query(Chunk, DocumentModel).join(DocumentModel, Chunk.document_id == DocumentModel.id)
     if document_id:
         q = q.filter(Chunk.document_id == document_id)
-    return q.all()
+    rows = q.all()
+    return [
+        Document(
+            page_content=chunk.text,
+            metadata={
+                "chunk_id": chunk.id,
+                "document_id": doc.id,
+                "filename": doc.filename,
+                "page_number": chunk.page_number,
+                "parent_text": chunk.parent_text,
+            },
+        )
+        for chunk, doc in rows
+    ]
 
 
-def _to_hit(chunk: Chunk, document: Document, score: float) -> dict:
-    return {
-        "chunk_id": chunk.id,
-        "score": score,
-        "text": chunk.text,
-        "document_id": document.id,
-        "filename": document.filename,
-        "page_number": chunk.page_number,
-        "parent_text": chunk.parent_text,
-    }
-
-
-def bm25_search(
-    db: Session, query: str, top_k: int = 5, document_id: str | None = None
-) -> list[dict]:
-    rows = _chunk_rows(db, document_id)
-    if not rows:
+def bm25_search(db: Session, query: str, top_k: int = 5, document_id: str | None = None) -> list[Document]:
+    docs = _chunk_documents(db, document_id)
+    if not docs:
         return []
-
-    corpus_tokens = [_tokenize(chunk.text) for chunk, _ in rows]
-    bm25 = BM25Okapi(corpus_tokens)
-    scores = bm25.get_scores(_tokenize(query))
-
-    ranked = sorted(zip(rows, scores), key=lambda x: x[1], reverse=True)[:top_k]
-    return [_to_hit(chunk, doc, float(score)) for (chunk, doc), score in ranked if score > 0]
+    retriever = BM25Retriever.from_documents(docs)
+    retriever.k = top_k
+    return retriever.invoke(query)
 
 
 def dense_search(
-    query: str,
-    embedding_model: str,
-    top_k: int = 5,
-    document_id: str | None = None,
-) -> list[dict]:
-    embedder = get_embedder(embedding_model)
-    query_vector = embedder.embed([query])[0]
-    return vectorstore.search(embedding_model, query_vector, top_k=top_k, document_id=document_id)
+    query: str, embedding_model: str, top_k: int = 5, document_id: str | None = None
+) -> list[Document]:
+    search_kwargs = {"k": top_k}
+    if document_id:
+        search_kwargs["filter"] = vectorstore.document_id_filter(document_id)
+    retriever = vectorstore.get_store(embedding_model).as_retriever(search_kwargs=search_kwargs)
+    return retriever.invoke(query)
 
 
 def hybrid_search(
@@ -72,33 +59,24 @@ def hybrid_search(
     embedding_model: str,
     top_k: int = 5,
     document_id: str | None = None,
-    rrf_k: int = 60,
-) -> list[dict]:
-    """Reciprocal Rank Fusion of BM25 (lexical) + dense (semantic) results.
-    RRF score = sum(1 / (rrf_k + rank)) across the lists a chunk appears in
-    — a standard way to combine differently-scaled rankers without needing
-    to normalize raw scores against each other."""
-    bm25_hits = bm25_search(db, query, top_k=top_k * 2, document_id=document_id)
-    dense_hits = dense_search(query, embedding_model, top_k=top_k * 2, document_id=document_id)
+) -> list[Document]:
+    """LangChain's EnsembleRetriever combines rankers via Reciprocal Rank
+    Fusion — a standard way to merge differently-scaled rankers (lexical
+    BM25 vs. dense cosine similarity) without normalizing raw scores."""
+    bm25_docs = _chunk_documents(db, document_id)
+    if not bm25_docs:
+        return dense_search(query, embedding_model, top_k, document_id)
 
-    fused: dict[str, dict] = {}
-    fused_scores: dict[str, float] = {}
+    bm25_retriever = BM25Retriever.from_documents(bm25_docs)
+    bm25_retriever.k = top_k
 
-    for rank, hit in enumerate(bm25_hits):
-        fused[hit["chunk_id"]] = hit
-        fused_scores[hit["chunk_id"]] = fused_scores.get(hit["chunk_id"], 0) + 1 / (rrf_k + rank + 1)
+    search_kwargs = {"k": top_k}
+    if document_id:
+        search_kwargs["filter"] = vectorstore.document_id_filter(document_id)
+    dense_retriever = vectorstore.get_store(embedding_model).as_retriever(search_kwargs=search_kwargs)
 
-    for rank, hit in enumerate(dense_hits):
-        fused[hit["chunk_id"]] = hit
-        fused_scores[hit["chunk_id"]] = fused_scores.get(hit["chunk_id"], 0) + 1 / (rrf_k + rank + 1)
-
-    ranked_ids = sorted(fused_scores, key=fused_scores.get, reverse=True)[:top_k]
-    results = []
-    for cid in ranked_ids:
-        hit = dict(fused[cid])
-        hit["score"] = fused_scores[cid]
-        results.append(hit)
-    return results
+    ensemble = EnsembleRetriever(retrievers=[bm25_retriever, dense_retriever], weights=[0.5, 0.5])
+    return ensemble.invoke(query)[:top_k]
 
 
 def retrieve(
@@ -108,7 +86,7 @@ def retrieve(
     embedding_model: str,
     top_k: int = 5,
     document_id: str | None = None,
-) -> list[dict]:
+) -> list[Document]:
     if strategy == "bm25":
         return bm25_search(db, query, top_k=top_k, document_id=document_id)
     if strategy == "dense":

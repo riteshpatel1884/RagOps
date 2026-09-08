@@ -27,7 +27,7 @@ class Pipeline(Base):
     embedding_model = Column(String, default="local-tfidf-384")  # see app/rag/embeddings.py
     retriever_type = Column(String, default="hybrid")  # bm25 | dense | hybrid
     reranker_type = Column(String, default="none")  # none | cross_encoder
-    llm_model = Column(String, default="claude-sonnet-4-6")
+    llm_model = Column(String, default="llama-3.3-70b-versatile")
 
     top_k = Column(Integer, default=5)
 

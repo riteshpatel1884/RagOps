@@ -1,32 +1,22 @@
-"""Embedding provider registry.
+"""Embedding provider registry, exposed through LangChain's `Embeddings`
+interface so they plug directly into langchain_qdrant.QdrantVectorStore and
+langchain_experimental's SemanticChunker.
 
-Phase 2 requires "at least 2 embedding models" so pipelines have something
-real to choose between. Both shipped here are zero-API-key, zero-download
-local embedders — deliberately different algorithms so they actually behave
-differently (one is word-level TF-IDF, the other is character-n-gram
-hashing, which is more typo/morphology-robust and worse at synonyms).
+Phase 2 requires "at least 2 embedding models". Both shipped here are
+zero-API-key, zero-download local embedders — deliberately different
+algorithms so they actually behave differently (one is word-level TF-IDF,
+the other character-n-gram hashing, which is more typo/morphology-robust
+and worse at synonyms). Neither is a strong semantic embedding model.
 
-Neither is a strong semantic embedding model. They exist so the full
-pipeline (chunk -> embed -> index -> retrieve -> generate) runs end-to-end
-with no external dependency. Swap in a real provider (OpenAI
-`text-embedding-3-small`, Voyage, Cohere, or a downloaded
-sentence-transformers model) by adding a class to EMBEDDERS below — the
-rest of the app (vectorstore, retriever, pipeline builder) already treats
-the embedding model as a named, swappable choice.
+Swap in a real provider (OpenAIEmbeddings from langchain-openai,
+VoyageAIEmbeddings, HuggingFaceEmbeddings, etc.) by registering an instance
+in EMBEDDINGS below — every consumer (vectorstore, semantic chunker,
+retriever) already treats the embedding model as a named, swappable
+LangChain Embeddings object.
 """
-from abc import ABC, abstractmethod
-
 import numpy as np
+from langchain_core.embeddings import Embeddings
 from sklearn.feature_extraction.text import HashingVectorizer, TfidfTransformer
-
-
-class Embedder(ABC):
-    name: str
-    dimensions: int
-
-    @abstractmethod
-    def embed(self, texts: list[str]) -> list[list[float]]:
-        ...
 
 
 def _normalize(dense: np.ndarray) -> np.ndarray:
@@ -35,50 +25,24 @@ def _normalize(dense: np.ndarray) -> np.ndarray:
     return dense / norms
 
 
-class LocalTfidfEmbedder(Embedder):
-    """Word-level hashing + TF-IDF re-weighting. Good at exact terminology
-    overlap (product names, numbers, proper nouns) — the kind of thing
-    finance/legal QA leans on."""
+class _LocalVectorizerEmbeddings(Embeddings):
+    """Base class for our zero-download local embedders."""
 
-    name = "local-tfidf-384"
-    dimensions = 384
+    name: str
+    dimensions: int
 
-    def __init__(self, dimensions: int = 384):
-        self.dimensions = dimensions
-        self._hasher = HashingVectorizer(n_features=dimensions, alternate_sign=False, norm=None)
-        self._tfidf = TfidfTransformer()
-
-    def embed(self, texts: list[str]) -> list[list[float]]:
-        if not texts:
-            return []
-        counts = self._hasher.transform(texts)
-        weighted = self._tfidf.fit_transform(counts)
-        dense = _normalize(weighted.toarray().astype(np.float32))
-        return dense.tolist()
-
-
-class LocalCharNgramEmbedder(Embedder):
-    """Character n-gram (3-5) hashing. More robust to typos, plurals, and
-    morphological variation than the word-level embedder; weaker on
-    synonyms. Included specifically so Phase 2's retriever/reranker code
-    has to deal with genuinely different embedding spaces, not two
-    thin wrappers around the same vectors."""
-
-    name = "local-charngram-384"
-    dimensions = 384
-
-    def __init__(self, dimensions: int = 384):
+    def __init__(self, dimensions: int = 384, analyzer: str = "word", ngram_range: tuple = (1, 1)):
         self.dimensions = dimensions
         self._hasher = HashingVectorizer(
             n_features=dimensions,
             alternate_sign=False,
             norm=None,
-            analyzer="char_wb",
-            ngram_range=(3, 5),
+            analyzer=analyzer,
+            ngram_range=ngram_range,
         )
         self._tfidf = TfidfTransformer()
 
-    def embed(self, texts: list[str]) -> list[list[float]]:
+    def _embed(self, texts: list[str]) -> list[list[float]]:
         if not texts:
             return []
         counts = self._hasher.transform(texts)
@@ -86,22 +50,53 @@ class LocalCharNgramEmbedder(Embedder):
         dense = _normalize(weighted.toarray().astype(np.float32))
         return dense.tolist()
 
+    def embed_documents(self, texts: list[str]) -> list[list[float]]:
+        return self._embed(texts)
 
-EMBEDDERS: dict[str, Embedder] = {
-    "local-tfidf-384": LocalTfidfEmbedder(),
-    "local-charngram-384": LocalCharNgramEmbedder(),
+    def embed_query(self, text: str) -> list[float]:
+        return self._embed([text])[0]
+
+
+class LocalTfidfEmbeddings(_LocalVectorizerEmbeddings):
+    """Word-level hashing + TF-IDF re-weighting. Good at exact terminology
+    overlap (product names, numbers, proper nouns)."""
+
+    name = "local-tfidf-384"
+
+    def __init__(self, dimensions: int = 384):
+        super().__init__(dimensions=dimensions, analyzer="word")
+
+
+class LocalCharNgramEmbeddings(_LocalVectorizerEmbeddings):
+    """Character n-gram (3-5) hashing. More robust to typos, plurals, and
+    morphological variation than the word-level embedder; weaker on
+    synonyms."""
+
+    name = "local-charngram-384"
+
+    def __init__(self, dimensions: int = 384):
+        super().__init__(dimensions=dimensions, analyzer="char_wb", ngram_range=(3, 5))
+
+
+EMBEDDINGS: dict[str, Embeddings] = {
+    "local-tfidf-384": LocalTfidfEmbeddings(),
+    "local-charngram-384": LocalCharNgramEmbeddings(),
 }
 
-DEFAULT_EMBEDDER = "local-tfidf-384"
+DEFAULT_EMBEDDING_MODEL = "local-tfidf-384"
 
 
-def get_embedder(name: str | None = None) -> Embedder:
-    name = name or DEFAULT_EMBEDDER
-    embedder = EMBEDDERS.get(name)
-    if embedder is None:
+def get_langchain_embeddings(name: str | None = None) -> Embeddings:
+    name = name or DEFAULT_EMBEDDING_MODEL
+    embeddings = EMBEDDINGS.get(name)
+    if embeddings is None:
         raise ValueError(f"Unknown embedding model: {name!r}")
-    return embedder
+    return embeddings
 
 
 def list_embedders() -> list[str]:
-    return list(EMBEDDERS.keys())
+    return list(EMBEDDINGS.keys())
+
+
+def get_dimensions(name: str) -> int:
+    return get_langchain_embeddings(name).dimensions

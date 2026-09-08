@@ -22,7 +22,7 @@ class PipelineIn(BaseModel):
     embedding_model: str = "local-tfidf-384"
     retriever_type: str = "hybrid"
     reranker_type: str = "none"
-    llm_model: str = "claude-sonnet-4-6"
+    llm_model: str = "llama-3.3-70b-versatile"
     top_k: int = Field(default=5, ge=1, le=50)
 
 
