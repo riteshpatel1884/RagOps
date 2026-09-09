@@ -8,6 +8,7 @@ import {
   Database,
   Workflow,
   FlaskConical,
+  FileQuestion,
   BarChart3,
   Activity,
   ShieldCheck,
@@ -32,8 +33,9 @@ const NAV = [
   {
     group: "Evaluation",
     items: [
+      { label: "Datasets", href: "/evaluations/datasets", icon: FileQuestion, status: "live" },
       { label: "Experiments", href: "/experiments", icon: FlaskConical, status: "soon" },
-      { label: "Metrics", href: "/evaluations", icon: BarChart3, status: "soon" },
+      { label: "Metrics", href: "/evaluations", icon: BarChart3, status: "live" },
     ],
   },
   {
@@ -103,7 +105,7 @@ export default function Sidebar() {
       </nav>
 
       <div className="border-t border-border px-5 py-3 text-xs text-muted">
-        Phase 0–2 · Core MVP
+        Phase 0–4 · Core MVP
       </div>
     </aside>
   );

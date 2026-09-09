@@ -1,9 +1,9 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api.routes import datasets, health, pipelines, playground
+from app.api.routes import datasets, evaluation_runs, evaluations, health, pipelines, playground
 from app.db.session import Base, SessionLocal, engine
-from app.models import document, pipeline as pipeline_model  # noqa: F401 (registers models on Base)
+from app.models import document, evaluation, pipeline as pipeline_model  # noqa: F401 (registers models on Base)
 
 Base.metadata.create_all(bind=engine)
 
@@ -23,7 +23,7 @@ def _seed_default_pipeline():
                     embedding_model="local-tfidf-384",
                     retriever_type="hybrid",
                     reranker_type="none",
-                    llm_model="llama-3.3-70b-versatile",
+                    llm_model="openai/gpt-oss-120b",
                     top_k=5,
                 )
             )
@@ -48,3 +48,5 @@ app.include_router(health.router, prefix="/api")
 app.include_router(datasets.router, prefix="/api")
 app.include_router(playground.router, prefix="/api")
 app.include_router(pipelines.router, prefix="/api")
+app.include_router(evaluations.router, prefix="/api")
+app.include_router(evaluation_runs.router, prefix="/api")
