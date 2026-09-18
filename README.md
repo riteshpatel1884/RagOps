@@ -4,7 +4,6 @@
 
 RAGOps lets you configure RAG pipelines (chunking, embeddings, retrieval, reranking), run them against ground-truth evaluation datasets, and get back objective retrieval and generation metrics — instead of eyeballing whether an answer "looks right."
 
-> **Current status:** Phases 0–4 complete (Core MVP: Architecture → RAG Pipeline → Configurable Pipelines → Evaluation Datasets → Evaluation Engine). Actively building toward automated experimentation, observability, and AI security testing (see [Roadmap](#roadmap)).
 
 ---
 
