@@ -20,3 +20,6 @@ langchain-classic
 langchain-qdrant
 langchain-experimental
 langchain-groq
+qdrant-client
+langchain-huggingface
+sentence-transformers

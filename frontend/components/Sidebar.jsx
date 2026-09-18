@@ -11,6 +11,7 @@ import {
   FileQuestion,
   BarChart3,
   Activity,
+  ScrollText,
   ShieldCheck,
   Gauge,
   Settings,
@@ -34,13 +35,16 @@ const NAV = [
     group: "Evaluation",
     items: [
       { label: "Datasets", href: "/evaluations/datasets", icon: FileQuestion, status: "live" },
-      { label: "Experiments", href: "/experiments", icon: FlaskConical, status: "soon" },
+      { label: "Experiments", href: "/experiments", icon: FlaskConical, status: "live" },
       { label: "Metrics", href: "/evaluations", icon: BarChart3, status: "live" },
     ],
   },
   {
     group: "Observability",
-    items: [{ label: "Traces", href: "/traces", icon: Activity, status: "soon" }],
+    items: [
+      { label: "Traces", href: "/traces", icon: Activity, status: "live" },
+      { label: "Logs", href: "/logs", icon: ScrollText, status: "live" },
+    ],
   },
   {
     group: "Security",
@@ -105,7 +109,7 @@ export default function Sidebar() {
       </nav>
 
       <div className="border-t border-border px-5 py-3 text-xs text-muted">
-        Phase 0–4 · Core MVP
+        Phase 0–8 · Production Differentiators
       </div>
     </aside>
   );

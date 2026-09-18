@@ -35,6 +35,13 @@ export const api = {
       body: JSON.stringify(pipeline),
     }).then((r) => json(r)),
 
+  updatePipeline: (id, pipeline) =>
+    fetch(`/api/pipelines/${id}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(pipeline),
+    }).then((r) => json(r)),
+
   deletePipeline: (id) =>
     fetch(`/api/pipelines/${id}`, { method: "DELETE" }).then((r) => json(r)),
 
@@ -94,4 +101,32 @@ export const api = {
   getEvalRun: (id) => fetch(`/api/evaluations/runs/${id}`).then((r) => json(r)),
 
   deleteEvalRun: (id) => fetch(`/api/evaluations/runs/${id}`, { method: "DELETE" }).then((r) => json(r)),
+
+  getExperimentOptions: () => fetch("/api/experiments/options").then((r) => json(r)),
+
+  listExperiments: () => fetch("/api/experiments").then((r) => json(r)),
+
+  createExperiment: (experiment) =>
+    fetch("/api/experiments", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(experiment),
+    }).then((r) => json(r)),
+
+  getExperiment: (id) => fetch(`/api/experiments/${id}`).then((r) => json(r)),
+
+  deleteExperiment: (id) => fetch(`/api/experiments/${id}`, { method: "DELETE" }).then((r) => json(r)),
+
+  experimentExportUrl: (id) => `/api/experiments/${id}/export`,
+
+  getTraceOptions: () => fetch("/api/traces/options").then((r) => json(r)),
+
+  listTraces: (params = {}) => {
+    const query = new URLSearchParams(
+      Object.fromEntries(Object.entries(params).filter(([, v]) => v !== "" && v != null))
+    ).toString();
+    return fetch(`/api/traces${query ? `?${query}` : ""}`).then((r) => json(r));
+  },
+
+  getTrace: (id) => fetch(`/api/traces/${id}`).then((r) => json(r)),
 };

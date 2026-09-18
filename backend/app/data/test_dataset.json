@@ -1,0 +1,52 @@
+[
+  {
+    "id": "q1",
+    "question": "How many weeks of paid parental leave do full-time employees get?",
+    "relevant_doc_ids": ["parental_leave_policy"]
+  },
+  {
+    "id": "q2",
+    "question": "Can parental leave be split into two separate blocks?",
+    "relevant_doc_ids": ["parental_leave_policy"]
+  },
+  {
+    "id": "q3",
+    "question": "How many days per week can employees work remotely without special approval?",
+    "relevant_doc_ids": ["remote_work_policy"]
+  },
+  {
+    "id": "q4",
+    "question": "Does the company provide a stipend for home office equipment?",
+    "relevant_doc_ids": ["remote_work_policy"]
+  },
+  {
+    "id": "q5",
+    "question": "How long do I have to submit an expense after incurring it?",
+    "relevant_doc_ids": ["expense_reimbursement_policy"]
+  },
+  {
+    "id": "q6",
+    "question": "Is alcohol at a non-client event reimbursable?",
+    "relevant_doc_ids": ["expense_reimbursement_policy"]
+  },
+  {
+    "id": "q7",
+    "question": "How often are formal performance reviews conducted?",
+    "relevant_doc_ids": ["performance_review_policy"]
+  },
+  {
+    "id": "q8",
+    "question": "What happens if an employee receives a does-not-meet-expectations rating?",
+    "relevant_doc_ids": ["performance_review_policy"]
+  },
+  {
+    "id": "q9",
+    "question": "How many PTO days do employees get after five years of service?",
+    "relevant_doc_ids": ["paid_time_off_policy"]
+  },
+  {
+    "id": "q10",
+    "question": "Can unused PTO be carried over to the next year?",
+    "relevant_doc_ids": ["paid_time_off_policy"]
+  }
+]

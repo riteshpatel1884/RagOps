@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { Plus, Trash2, Workflow, Loader2 } from "lucide-react";
+import { Plus, Trash2, Pencil, X, Workflow, Loader2 } from "lucide-react";
 import { api } from "@/lib/api";
 
 const DEFAULT_FORM = {
@@ -10,7 +10,7 @@ const DEFAULT_FORM = {
   embedding_model: "local-tfidf-384",
   retriever_type: "hybrid",
   reranker_type: "none",
-  llm_model: "claude-sonnet-4-6",
+  llm_model: "",
   chunk_size: 512,
   chunk_overlap: 64,
   top_k: 5,
@@ -55,6 +55,7 @@ export default function PipelinesPage() {
   const [options, setOptions] = useState(null);
   const [pipelines, setPipelines] = useState([]);
   const [form, setForm] = useState(DEFAULT_FORM);
+  const [editingId, setEditingId] = useState(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -64,6 +65,7 @@ export default function PipelinesPage() {
       const [opts, list] = await Promise.all([api.getPipelineOptions(), api.listPipelines()]);
       setOptions(opts);
       setPipelines(list);
+      setForm((f) => (f.llm_model ? f : { ...f, llm_model: opts.llm_model[0] || "" }));
       setError(null);
     } catch (e) {
       setError("Couldn't reach the backend. Is it running on :8000?");
@@ -80,6 +82,27 @@ export default function PipelinesPage() {
     setForm((f) => ({ ...f, [key]: value }));
   }
 
+  function startEdit(p) {
+    setEditingId(p.id);
+    setForm({
+      name: p.name,
+      chunking_strategy: p.chunking_strategy,
+      embedding_model: p.embedding_model,
+      retriever_type: p.retriever_type,
+      reranker_type: p.reranker_type,
+      llm_model: p.llm_model,
+      chunk_size: p.chunk_size,
+      chunk_overlap: p.chunk_overlap,
+      top_k: p.top_k,
+    });
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }
+
+  function cancelEdit() {
+    setEditingId(null);
+    setForm((f) => ({ ...DEFAULT_FORM, llm_model: options?.llm_model[0] || "" }));
+  }
+
   async function handleSave() {
     if (!form.name.trim()) {
       setError("Give the pipeline a name first.");
@@ -87,9 +110,14 @@ export default function PipelinesPage() {
     }
     setSaving(true);
     try {
-      await api.createPipeline(form);
-      setForm({ ...DEFAULT_FORM, name: "" });
+      if (editingId) {
+        await api.updatePipeline(editingId, form);
+      } else {
+        await api.createPipeline(form);
+      }
+      cancelEdit();
       await refresh();
+      setError(null);
     } catch (e) {
       setError("Couldn't save that pipeline — check the backend logs.");
     } finally {
@@ -99,6 +127,7 @@ export default function PipelinesPage() {
 
   async function handleDelete(id) {
     await api.deletePipeline(id);
+    if (editingId === id) cancelEdit();
     refresh();
   }
 
@@ -113,13 +142,23 @@ export default function PipelinesPage() {
       </div>
 
       {error && (
-        <div className="mb-4 rounded-sm border border-danger/30 bg-danger/10 px-3 py-2 text-sm text-danger">
-          {error}
+        <div className="mb-4 flex items-center justify-between rounded-sm border border-danger/30 bg-danger/10 px-3 py-2 text-sm text-danger">
+          <span>{error}</span>
+          <button onClick={() => setError(null)} className="text-danger hover:text-text">
+            <X size={14} />
+          </button>
         </div>
       )}
 
       <div className="mb-10 rounded-md border border-border bg-surface p-5">
-        <div className="mb-4 text-sm text-text">Create Pipeline</div>
+        <div className="mb-4 flex items-center justify-between">
+          <span className="text-sm text-text">{editingId ? "Edit Pipeline" : "Create Pipeline"}</span>
+          {editingId && (
+            <button onClick={cancelEdit} className="flex items-center gap-1 text-xs text-muted hover:text-text">
+              <X size={12} /> Cancel
+            </button>
+          )}
+        </div>
 
         <div className="mb-4">
           <label className="flex flex-col gap-1.5">
@@ -194,7 +233,7 @@ export default function PipelinesPage() {
           className="flex items-center gap-2 rounded-sm border border-accent bg-accent/10 px-3 py-2 text-sm text-accent transition-colors hover:bg-accent/20 disabled:opacity-50"
         >
           {saving ? <Loader2 size={14} className="animate-spin" /> : <Plus size={14} />}
-          Save Pipeline
+          {editingId ? "Save Changes" : "Save Pipeline"}
         </button>
       </div>
 
@@ -208,7 +247,9 @@ export default function PipelinesPage() {
           {pipelines.map((p) => (
             <div
               key={p.id}
-              className="flex items-center justify-between rounded-md border border-border bg-surface p-4"
+              className={`flex items-center justify-between rounded-md border p-4 ${
+                editingId === p.id ? "border-accent bg-accent/5" : "border-border bg-surface"
+              }`}
             >
               <div>
                 <div className="flex items-center gap-2 text-sm text-text">
@@ -233,12 +274,22 @@ export default function PipelinesPage() {
                   <span>top_k={p.top_k}</span>
                 </div>
               </div>
-              <button
-                onClick={() => handleDelete(p.id)}
-                className="text-muted transition-colors hover:text-danger"
-              >
-                <Trash2 size={14} />
-              </button>
+              <div className="flex items-center gap-3">
+                <button
+                  onClick={() => startEdit(p)}
+                  className="text-muted transition-colors hover:text-accent"
+                  title="Edit"
+                >
+                  <Pencil size={14} />
+                </button>
+                <button
+                  onClick={() => handleDelete(p.id)}
+                  className="text-muted transition-colors hover:text-danger"
+                  title="Delete"
+                >
+                  <Trash2 size={14} />
+                </button>
+              </div>
             </div>
           ))}
         </div>

@@ -1,7 +1,8 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { Send, Loader2, FileText } from "lucide-react";
+import { useCallback, useEffect, useState } from "react";
+import Link from "next/link";
+import { Send, Loader2, FileText, Trash2, Pencil } from "lucide-react";
 import { api } from "@/lib/api";
 
 export default function PlaygroundPage() {
@@ -12,15 +13,25 @@ export default function PlaygroundPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
 
-  useEffect(() => {
-    api
-      .listPipelines()
-      .then((list) => {
+  const refreshPipelines = useCallback(
+    async (keepSelection = true) => {
+      try {
+        const list = await api.listPipelines();
         setPipelines(list);
-        setSelectedPipeline(list[0]?.id || "");
-      })
-      .catch(() => setError("Couldn't reach the backend. Is it running on :8000?"));
-  }, []);
+        setSelectedPipeline((cur) => {
+          if (keepSelection && list.some((p) => p.id === cur)) return cur;
+          return list[0]?.id || "";
+        });
+      } catch (e) {
+        setError("Couldn't reach the backend. Is it running on :8000?");
+      }
+    },
+    []
+  );
+
+  useEffect(() => {
+    refreshPipelines(false);
+  }, [refreshPipelines]);
 
   async function handleAsk() {
     if (!question.trim()) return;
@@ -30,11 +41,23 @@ export default function PlaygroundPage() {
       const res = await api.ask(question.trim(), selectedPipeline);
       setResult(res);
     } catch (e) {
-      setError("Couldn't reach the backend. Is it running on :8000?");
+      setError(
+        "That pipeline's request failed — often this means its LLM model is no longer valid on Groq. Try editing or deleting it below."
+      );
     } finally {
       setLoading(false);
     }
   }
+
+  async function handleDeleteSelected() {
+    if (!selectedPipeline) return;
+    await api.deletePipeline(selectedPipeline);
+    setResult(null);
+    setError(null);
+    refreshPipelines(false);
+  }
+
+  const activePipeline = pipelines.find((p) => p.id === selectedPipeline);
 
   return (
     <div className="mx-auto max-w-3xl px-8 py-10">
@@ -45,8 +68,8 @@ export default function PlaygroundPage() {
         </p>
       </div>
 
-      <div className="mb-4">
-        <label className="flex flex-col gap-1.5">
+      <div className="mb-4 flex items-end gap-2">
+        <label className="flex flex-1 flex-col gap-1.5">
           <span className="text-xs text-muted">Pipeline</span>
           <select
             value={selectedPipeline}
@@ -61,6 +84,21 @@ export default function PlaygroundPage() {
             ))}
           </select>
         </label>
+        <Link
+          href="/pipelines"
+          title="Edit this pipeline"
+          className="flex items-center justify-center rounded-sm border border-border bg-surface p-2.5 text-muted transition-colors hover:text-accent"
+        >
+          <Pencil size={15} />
+        </Link>
+        <button
+          onClick={handleDeleteSelected}
+          disabled={!selectedPipeline}
+          title="Delete this pipeline"
+          className="flex items-center justify-center rounded-sm border border-border bg-surface p-2.5 text-muted transition-colors hover:text-danger disabled:opacity-50"
+        >
+          <Trash2 size={15} />
+        </button>
       </div>
 
       <div className="mb-6 flex gap-2">
@@ -92,7 +130,14 @@ export default function PlaygroundPage() {
           <div className="rounded-md border border-border bg-surface p-4">
             <div className="mb-2 flex items-center justify-between text-xs text-muted">
               <span>Answer</span>
-              <span className="font-mono text-accent">{result.pipeline}</span>
+              <span className="flex items-center gap-2">
+                <span className="font-mono text-accent">{result.pipeline}</span>
+                {result.trace_id && (
+                  <span className="font-mono text-[10px] text-muted" title="Trace ID — full trace browser lands in Phase 8">
+                    trace: {result.trace_id.slice(0, 8)}
+                  </span>
+                )}
+              </span>
             </div>
             <p className="whitespace-pre-wrap text-sm leading-relaxed text-text">
               {result.answer}
