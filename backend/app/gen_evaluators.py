@@ -22,20 +22,51 @@ ready to talk about where it disagrees with humans.
 """
 import re
 from abc import ABC, abstractmethod
-from typing import List
+from typing import List, Tuple
 import numpy as np
 from langchain_core.embeddings import Embeddings
 from langchain_core.prompts import ChatPromptTemplate
 
+# True function/discourse words (don't carry factual claims) plus common
+# "talking about the context" meta-words the LLM adds when hedging or
+# refusing to answer (e.g. "the provided context does not specify...").
+# These were previously miscounted as "unsupported facts" when they're
+# really just connective or self-referential language, not hallucinated
+# content.
 STOPWORDS = {
     "the", "a", "an", "is", "are", "do", "does", "of", "to", "in", "for", "on", "and", "or",
     "what", "how", "can", "many", "much", "i", "my", "will", "be", "am", "not", "this", "that",
+    "yes", "no", "you", "your", "they", "their", "but", "only", "may", "might", "provided",
+    "context", "specify", "specified", "states", "stated", "mentioned", "document", "text",
+    "according", "based",
 }
 
 
-def _content_words(text: str) -> set:
+def _stem(word: str) -> str:
+    """
+    Very small rule-based stemmer (not a real Porter stemmer) so morphological
+    variants match across answer and context — e.g. "incurring" vs "incurred",
+    "receives" vs "receive", "events" vs "event". Good enough for this
+    lexical-overlap proxy without adding an NLP dependency.
+    """
+    if word.endswith("ies") and len(word) > 4:
+        return word[:-3] + "y"
+    for suffix in ("ing", "ed", "s"):
+        if word.endswith(suffix) and len(word) - len(suffix) > 2:
+            return word[: -len(suffix)]
+    return word
+
+
+def _content_words(text: str) -> dict:
+    """Returns {stem: original_word} for content words, so callers can match
+    on stems (robust to morphology) while still reporting the original word."""
     words = re.findall(r"[a-z0-9]+", text.lower())
-    return {w for w in words if w not in STOPWORDS and len(w) > 2}
+    result = {}
+    for w in words:
+        if w in STOPWORDS or len(w) <= 2:
+            continue
+        result[_stem(w)] = w
+    return result
 
 
 # ---------------------------------------------------------------------------
@@ -61,19 +92,25 @@ class LexicalOverlapFaithfulness(BaseFaithfulnessEvaluator):
     name = "lexical-overlap (offline)"
 
     def score(self, answer: str, context: List[str]) -> dict:
-        answer_words = _content_words(answer)
+        answer_words = _content_words(answer)      # {stem: original_word}
         context_words = _content_words(" ".join(context))
 
         if not answer_words:
             return {"faithfulness": 0.0, "explanation": "Answer had no scorable content words."}
 
-        supported = answer_words & context_words
-        unsupported = answer_words - context_words
-        faithfulness = len(supported) / len(answer_words)
+        answer_stems = set(answer_words.keys())
+        context_stems = set(context_words.keys())
 
-        explanation = f"{len(supported)}/{len(answer_words)} content words found in context."
-        if unsupported:
-            explanation += f" Unsupported terms: {', '.join(sorted(unsupported)[:6])}"
+        supported_stems = answer_stems & context_stems
+        unsupported_stems = answer_stems - context_stems
+        faithfulness = len(supported_stems) / len(answer_stems)
+
+        # Report the original (unstemmed) words for readability.
+        unsupported_words = sorted(answer_words[s] for s in unsupported_stems)
+
+        explanation = f"{len(supported_stems)}/{len(answer_stems)} content words found in context."
+        if unsupported_words:
+            explanation += f" Unsupported terms: {', '.join(unsupported_words[:6])}"
 
         return {"faithfulness": faithfulness, "explanation": explanation}
 

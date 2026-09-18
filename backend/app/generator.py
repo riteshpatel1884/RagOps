@@ -16,6 +16,7 @@ Two implementations, same pattern as embedder.py:
    Nothing else in the pipeline changes.
 """
 import re
+import os
 from abc import ABC, abstractmethod
 from typing import List
 from langchain_core.prompts import ChatPromptTemplate
@@ -111,7 +112,7 @@ def get_generator(name: str = "extractive", **kwargs) -> BaseGenerator:
 
     if name == "groq":
         from langchain_groq import ChatGroq  # requires GROQ_API_KEY + network
-        kwargs.setdefault("model", "llama-3.3-70b-versatile")
+        kwargs.setdefault("model", os.environ.get("GROQ_MODEL", "llama-3.3-70b-versatile"))
         return LangChainLLMGenerator(ChatGroq(**kwargs))
 
     raise ValueError(f"Unknown generator: {name}")

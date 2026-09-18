@@ -6,7 +6,10 @@ about this file needs to change later, only the config values passed in.
 """
 from dataclasses import dataclass, asdict
 from typing import List, Dict
+from dotenv import load_dotenv
 from langchain_core.documents import Document
+
+load_dotenv()  # reads .env (GROQ_API_KEY, QDRANT_URL, QDRANT_API_KEY, etc.) into os.environ
 
 from chunking import chunk_documents
 from embedder import get_embedder

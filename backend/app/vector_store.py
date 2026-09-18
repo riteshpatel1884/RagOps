@@ -2,11 +2,11 @@
 Qdrant-backed vector store, wired through LangChain's own integration
 (`langchain_qdrant.QdrantVectorStore`) rather than the raw qdrant-client API.
 
-Uses Qdrant's embedded local mode (`:memory:` or an on-disk path) so the
-whole pipeline runs with no external Qdrant server required. Point
-`location` at a real Qdrant server URL (e.g. "http://localhost:6333") in
-production — nothing else in this class changes.
+Defaults to Qdrant Cloud if QDRANT_URL (and QDRANT_API_KEY) are set in the
+environment (e.g. via .env) — otherwise falls back to Qdrant's embedded
+`:memory:` mode so the pipeline still runs with zero external setup.
 """
+import os
 from typing import List
 from langchain_core.documents import Document
 from langchain_core.embeddings import Embeddings
@@ -14,15 +14,29 @@ from langchain_qdrant import QdrantVectorStore
 
 
 class QdrantStore:
-    def __init__(self, embedding: Embeddings, collection_name: str = "rag_chunks", location: str = ":memory:"):
+    def __init__(
+        self,
+        embedding: Embeddings,
+        collection_name: str = "rag_chunks",
+        location: str = None,
+        api_key: str = None,
+    ):
         self.embedding = embedding
         self.collection_name = collection_name
-        self.location = location
+        # Precedence: explicit args > QDRANT_URL/QDRANT_API_KEY env vars > in-memory fallback.
+        self.location = location or os.environ.get("QDRANT_URL") or ":memory:"
+        self.api_key = api_key or os.environ.get("QDRANT_API_KEY")
         self.vectorstore: QdrantVectorStore | None = None
 
     def build(self, documents: List[Document]) -> None:
         """(Re)create the collection and index all chunks via LangChain's QdrantVectorStore."""
-        kwargs = {"location": self.location} if not self.location.startswith("http") else {"url": self.location}
+        if self.location.startswith("http"):
+            kwargs = {"url": self.location}
+            if self.api_key:
+                kwargs["api_key"] = self.api_key
+        else:
+            kwargs = {"location": self.location}
+
         self.vectorstore = QdrantVectorStore.from_documents(
             documents,
             embedding=self.embedding,
