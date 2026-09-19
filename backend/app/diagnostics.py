@@ -40,6 +40,14 @@ class Diagnosis:
     likely_causes: List[str] = field(default_factory=list)
     suggested_experiments: List[dict] = field(default_factory=list)
 
+    def as_dict(self) -> dict:
+        return {
+            "bottleneck": self.bottleneck,
+            "evidence": self.evidence,
+            "likely_causes": self.likely_causes,
+            "suggested_experiments": self.suggested_experiments,
+        }
+
     def print(self):
         print(f"  Bottleneck: {self.bottleneck}")
         if self.evidence:
@@ -246,38 +254,82 @@ def describe_tradeoff(a: dict, b: dict, metric_x: str, metric_y: str) -> str:
     )
 
 
-def diagnose_experiment_results(results: List[dict], metric_x: str = "recall", metric_y: str = "faithfulness"):
-    """Print a full diagnostic report over an entire Phase 3 experiment sweep."""
-    print(f"\n=== Per-config diagnosis ({len(results)} configs) ===")
-    for i, r in enumerate(results, start=1):
-        c = r["config"]
-        print(f"\n[{i}] chunk={c['chunk_size']}/{c['chunk_overlap']}  top_k={c['top_k']}  "
-              f"embedder={c['embedder_name']}  generator={c['generator_name']}")
-        diagnose_config(r).print()
+def build_diagnostic_report(results: List[dict], metric_x: str = "recall", metric_y: str = "faithfulness") -> dict:
+    """
+    Structured (JSON-friendly) version of the full diagnostic report — no
+    printing. Used by both the CLI (diagnose_experiment_results, which
+    prints this) and the API server (which returns it directly as JSON).
+    """
+    per_config = []
+    for r in results:
+        per_config.append({"config": r["config"], "metrics": {k: v for k, v in r.items() if k != "config"},
+                            "diagnosis": diagnose_config(r).as_dict()})
+
+    report = {"per_config": per_config, "metric_x": metric_x, "metric_y": metric_y}
 
     if metric_y not in results[0]:
-        print(f"\n(Skipping trade-off analysis: '{metric_y}' not present — "
-              f"this sweep likely used --skip_generation.)")
+        report["frontier"] = None
+        report["tradeoff"] = f"Skipped: '{metric_y}' not present in these results (sweep likely used skip_generation)."
+        return report
+
+    frontier = pareto_frontier(results, metric_x, metric_y)
+    report["frontier"] = frontier
+
+    if len(frontier) >= 2:
+        best_x = max(frontier, key=lambda r: r[metric_x])
+        best_y = max(frontier, key=lambda r: r[metric_y])
+        report["tradeoff"] = (
+            None if best_x is best_y
+            else describe_tradeoff(best_x, best_y, metric_x, metric_y)
+        )
+    else:
+        report["tradeoff"] = None
+
+    return report
+
+
+def diagnose_experiment_results(results: List[dict], metric_x: str = "recall", metric_y: str = "faithfulness"):
+    """Print a full diagnostic report over an entire Phase 3 experiment sweep."""
+    report = build_diagnostic_report(results, metric_x, metric_y)
+
+    print(f"\n=== Per-config diagnosis ({len(results)} configs) ===")
+    for i, entry in enumerate(report["per_config"], start=1):
+        c = entry["config"]
+        print(f"\n[{i}] chunk={c['chunk_size']}/{c['chunk_overlap']}  top_k={c['top_k']}  "
+              f"embedder={c['embedder_name']}  generator={c['generator_name']}")
+        d = entry["diagnosis"]
+        print(f"  Bottleneck: {d['bottleneck']}")
+        if d["evidence"]:
+            print("  Evidence:")
+            for e in d["evidence"]:
+                print(f"    • {e}")
+        if d["likely_causes"]:
+            print("  Likely causes:")
+            for c_ in d["likely_causes"]:
+                print(f"    → {c_}")
+        if d["suggested_experiments"]:
+            print("  Suggested next experiments:")
+            for i2, s in enumerate(d["suggested_experiments"], start=1):
+                print(f"    {i2}. {s['label']}")
+
+    if report["frontier"] is None:
+        print(f"\n{report['tradeoff']}")
         return
 
     print(f"\n=== Pareto frontier: {metric_x} vs {metric_y} ===")
     print(f"(Configs where no other config is at least as good on both metrics — everything")
     print(f" else in this sweep is dominated and not worth considering on these two axes.)\n")
-    frontier = pareto_frontier(results, metric_x, metric_y)
-    for r in frontier:
+    for r in report["frontier"]:
         c = r["config"]
         print(f"  chunk={c['chunk_size']}/{c['chunk_overlap']}  top_k={c['top_k']}  "
               f"embedder={c['embedder_name']}  generator={c['generator_name']}  "
               f"-- {metric_x}={r[metric_x]:.3f}, {metric_y}={r[metric_y]:.3f}")
 
-    if len(frontier) >= 2:
+    if report["tradeoff"]:
         print(f"\n=== Trade-off between frontier extremes ===")
-        best_x = max(frontier, key=lambda r: r[metric_x])
-        best_y = max(frontier, key=lambda r: r[metric_y])
-        if best_x is not best_y:
-            print(f"  {describe_tradeoff(best_x, best_y, metric_x, metric_y)}")
-        else:
-            print(f"  One config leads on both {metric_x} and {metric_y} — no real trade-off in this sweep.")
+        print(f"  {report['tradeoff']}")
+    elif len(report["frontier"]) >= 2:
+        print(f"\n  One config leads on both {metric_x} and {metric_y} — no real trade-off in this sweep.")
 
 
 def latest_results_file(results_dir: Path) -> Optional[Path]:

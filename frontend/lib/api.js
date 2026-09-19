@@ -1,132 +1,124 @@
-async function json(res) {
+// Shared API client for the RAG Evaluation & Optimization Engine backend.
+// Every page imports from here rather than calling fetch() directly, so
+// the base URL and error handling only live in one place.
+
+const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+
+export class ApiError extends Error {}
+
+async function request(path, options) {
+  let res;
+  try {
+    res = await fetch(`${API_URL}${path}`, {
+      headers: { "Content-Type": "application/json", ...(options?.headers || {}) },
+      ...options,
+    });
+  } catch (e) {
+    throw new ApiError(
+      `Could not reach the API at ${API_URL}. Is the backend running? (uvicorn api:app --port 8000)`
+    );
+  }
+
   if (!res.ok) {
-    const body = await res.text();
-    throw new Error(`API error ${res.status}: ${body}`);
+    let detail = res.statusText;
+    try {
+      const body = await res.json();
+      detail = body.detail || JSON.stringify(body);
+    } catch {
+      /* ignore parse failure, fall back to statusText */
+    }
+    throw new ApiError(detail);
   }
   return res.json();
 }
 
+// --- Shape reference (for documentation only — no runtime effect) ----------
+//
+// ConfigOption:            { value, label }
+// ConfigOptions:           { embedders, generators, judges } — arrays of ConfigOption
+// PipelineConfigDict:      { chunk_size, chunk_overlap, embedder_name, top_k, collection_name?, generator_name }
+// TestDatasetItem:         { id, question, relevant_doc_ids }
+// RetrievalEvalResult:     { overall, per_query: [{ id, question, top_hit_doc, expected_docs, first_relevant_rank, ...metrics }] }
+// GenerationEvalResult:    { avg_faithfulness, avg_relevance, rows: [{ id, question, answer, faithfulness, faithfulness_explanation, relevance, relevance_explanation }] }
+// AskResult:               { question, answer, retrieved_hits: [{ chunk_id, doc_id, text, score }] }
+// ExperimentRow:           { config, recall?, precision?, mrr?, ndcg?, elapsed_seconds?, faithfulness?, relevance?, error? }
+// ExperimentResponse:      { results, failed, sort_by, filename }
+// ExperimentListItem:      { filename, modified }
+// Diagnosis:               { bottleneck, evidence, likely_causes, suggested_experiments: [{ label, param, op, value }] }
+// DiagnosticReport:        { per_config: [{ config, metrics, diagnosis }], metric_x, metric_y, frontier, tradeoff }
+// AutoFollowUpResponse:    { worst_config, diagnosis, suggestion?, new_config?, before_after?, followed_up, message? }
+// VersionRecord:           { name, timestamp, config, metrics, notes }
+// RegressionEntry:         { metric, old, new, delta, direction }
+// RegressionComparison:    { old_version, new_version, regressions, improvements, unchanged, has_regression }
+
+// --- Endpoints ---------------------------------------------------------------
+
 export const api = {
-  listDocuments: () => fetch("/api/datasets").then((r) => json(r)),
+  configOptions: () => request("/api/config-options"),
 
-  uploadDocument: (file, pipelineId) => {
+  uploadDocuments: (files) => {
     const form = new FormData();
-    form.append("file", file);
-    if (pipelineId) form.append("pipeline_id", pipelineId);
-    return fetch("/api/datasets/upload", { method: "POST", body: form }).then((r) => json(r));
-  },
-
-  deleteDocument: (id) =>
-    fetch(`/api/datasets/${id}`, { method: "DELETE" }).then((r) => json(r)),
-
-  ask: (question, pipelineId) =>
-    fetch("/api/playground/ask", {
+    files.forEach((f) => form.append("files", f));
+    return request("/api/documents/upload", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ question, pipeline_id: pipelineId }),
-    }).then((r) => json(r)),
-
-  listPipelines: () => fetch("/api/pipelines").then((r) => json(r)),
-
-  createPipeline: (pipeline) =>
-    fetch("/api/pipelines", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(pipeline),
-    }).then((r) => json(r)),
-
-  updatePipeline: (id, pipeline) =>
-    fetch(`/api/pipelines/${id}`, {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(pipeline),
-    }).then((r) => json(r)),
-
-  deletePipeline: (id) =>
-    fetch(`/api/pipelines/${id}`, { method: "DELETE" }).then((r) => json(r)),
-
-  getPipelineOptions: () => fetch("/api/pipelines/options").then((r) => json(r)),
-
-  listEvalDatasets: () => fetch("/api/evaluations/datasets").then((r) => json(r)),
-
-  createEvalDataset: (name) =>
-    fetch("/api/evaluations/datasets", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name }),
-    }).then((r) => json(r)),
-
-  deleteEvalDataset: (id) =>
-    fetch(`/api/evaluations/datasets/${id}`, { method: "DELETE" }).then((r) => json(r)),
-
-  getEvalDataset: (id) => fetch(`/api/evaluations/datasets/${id}`).then((r) => json(r)),
-
-  addEvalQuestion: (datasetId, question) =>
-    fetch(`/api/evaluations/datasets/${datasetId}/questions`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(question),
-    }).then((r) => json(r)),
-
-  updateEvalQuestion: (datasetId, questionId, question) =>
-    fetch(`/api/evaluations/datasets/${datasetId}/questions/${questionId}`, {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(question),
-    }).then((r) => json(r)),
-
-  deleteEvalQuestion: (datasetId, questionId) =>
-    fetch(`/api/evaluations/datasets/${datasetId}/questions/${questionId}`, {
-      method: "DELETE",
-    }).then((r) => json(r)),
-
-  uploadEvalQuestions: (datasetId, file) => {
-    const form = new FormData();
-    form.append("file", file);
-    return fetch(`/api/evaluations/datasets/${datasetId}/upload`, {
-      method: "POST",
+      headers: {}, // let the browser set the multipart boundary
       body: form,
-    }).then((r) => json(r));
+    });
   },
 
-  listEvalRuns: () => fetch("/api/evaluations/runs").then((r) => json(r)),
+  getDocuments: () => request("/api/documents"),
 
-  createEvalRun: (pipelineId, datasetId) =>
-    fetch("/api/evaluations/runs", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ pipeline_id: pipelineId, dataset_id: datasetId }),
-    }).then((r) => json(r)),
+  saveTestDataset: (items) =>
+    request("/api/test-dataset", { method: "POST", body: JSON.stringify(items) }),
 
-  getEvalRun: (id) => fetch(`/api/evaluations/runs/${id}`).then((r) => json(r)),
-
-  deleteEvalRun: (id) => fetch(`/api/evaluations/runs/${id}`, { method: "DELETE" }).then((r) => json(r)),
-
-  getExperimentOptions: () => fetch("/api/experiments/options").then((r) => json(r)),
-
-  listExperiments: () => fetch("/api/experiments").then((r) => json(r)),
-
-  createExperiment: (experiment) =>
-    fetch("/api/experiments", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(experiment),
-    }).then((r) => json(r)),
-
-  getExperiment: (id) => fetch(`/api/experiments/${id}`).then((r) => json(r)),
-
-  deleteExperiment: (id) => fetch(`/api/experiments/${id}`, { method: "DELETE" }).then((r) => json(r)),
-
-  experimentExportUrl: (id) => `/api/experiments/${id}/export`,
-
-  getTraceOptions: () => fetch("/api/traces/options").then((r) => json(r)),
-
-  listTraces: (params = {}) => {
-    const query = new URLSearchParams(
-      Object.fromEntries(Object.entries(params).filter(([, v]) => v !== "" && v != null))
-    ).toString();
-    return fetch(`/api/traces${query ? `?${query}` : ""}`).then((r) => json(r));
+  uploadTestDatasetFile: (file) => {
+    const form = new FormData();
+    form.append("file", file);
+    return request("/api/test-dataset/upload", { method: "POST", headers: {}, body: form });
   },
 
-  getTrace: (id) => fetch(`/api/traces/${id}`).then((r) => json(r)),
+  getTestDataset: () => request("/api/test-dataset"),
+
+  evaluateRetrieval: (config) =>
+    request("/api/evaluate/retrieval", { method: "POST", body: JSON.stringify(config) }),
+
+  evaluateGeneration: (config) =>
+    request("/api/evaluate/generation", { method: "POST", body: JSON.stringify(config) }),
+
+  ask: (payload) =>
+    request("/api/ask", { method: "POST", body: JSON.stringify(payload) }),
+
+  runExperiment: (payload) =>
+    request("/api/experiment", { method: "POST", body: JSON.stringify(payload) }),
+
+  listExperiments: () => request("/api/experiments"),
+
+  getExperiment: (filename) => request(`/api/experiments/${filename}`),
+
+  diagnose: (payload) =>
+    request("/api/diagnose", { method: "POST", body: JSON.stringify(payload) }),
+
+  diagnoseSingle: (metrics) =>
+    request("/api/diagnose/single", { method: "POST", body: JSON.stringify(metrics) }),
+
+  autoFollowUp: (payload) =>
+    request("/api/diagnose/auto-follow-up", { method: "POST", body: JSON.stringify(payload) }),
+
+  // --- Phase 5: regression testing ---
+
+  recordVersion: (payload) =>
+    request("/api/versions/record", { method: "POST", body: JSON.stringify(payload) }),
+
+  listVersions: () => request("/api/versions"),
+
+  getVersion: (name) => request(`/api/versions/${encodeURIComponent(name)}`),
+
+  deleteVersion: (name) =>
+    request(`/api/versions/${encodeURIComponent(name)}`, { method: "DELETE" }),
+
+  setBaseline: (name) =>
+    request("/api/versions/set-baseline", { method: "POST", body: JSON.stringify({ name }) }),
+
+  checkRegression: (payload) =>
+    request("/api/versions/check", { method: "POST", body: JSON.stringify(payload) }),
 };

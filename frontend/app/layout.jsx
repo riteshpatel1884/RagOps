@@ -1,5 +1,4 @@
 import { IBM_Plex_Sans, IBM_Plex_Mono } from "next/font/google";
-import Sidebar from "@/components/Sidebar";
 import "./globals.css";
 
 const plexSans = IBM_Plex_Sans({
@@ -19,13 +18,25 @@ export const metadata = {
   description: "Production RAG evaluation, observability & optimization platform",
 };
 
+// Runs before paint (blocking <head> script) so the correct theme class is
+// on <html> before React hydrates — avoids a flash of the wrong theme.
+const THEME_INIT_SCRIPT = `
+(function () {
+  try {
+    var stored = localStorage.getItem("ragops-theme");
+    var theme = stored || (window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
+    if (theme === "dark") document.documentElement.classList.add("dark");
+  } catch (e) {}
+})();
+`;
+
 export default function RootLayout({ children }) {
   return (
-    <html lang="en" className={`${plexSans.variable} ${plexMono.variable}`}>
-      <body className="flex bg-bg font-sans text-text antialiased">
-        <Sidebar />
-        <main className="h-screen flex-1 overflow-y-auto">{children}</main>
-      </body>
+    <html lang="en" className={`${plexSans.variable} ${plexMono.variable}`} suppressHydrationWarning>
+      <head>
+        <script dangerouslySetInnerHTML={{ __html: THEME_INIT_SCRIPT }} />
+      </head>
+      <body className="bg-bg font-sans text-text antialiased">{children}</body>
     </html>
   );
 }

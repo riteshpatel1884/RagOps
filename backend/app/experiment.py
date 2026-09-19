@@ -186,6 +186,22 @@ def parse_args():
     return p.parse_args()
 
 
+def run_sweep(configs: List[PipelineConfig], documents: dict, test_set: list, judge: str = "offline", skip_generation: bool = False) -> List[dict]:
+    """
+    Run every config in the grid and collect results. Used by both the CLI
+    (main(), below) and the API server, so the sweep logic only lives once.
+    Failed configs are included in the output with an "error" key rather
+    than being silently dropped.
+    """
+    results = []
+    for config in configs:
+        try:
+            results.append(run_single_config(config, documents, test_set, judge, skip_generation))
+        except Exception as e:
+            results.append({"config": config.as_dict(), "error": str(e)})
+    return results
+
+
 def main():
     args = parse_args()
     documents, test_set = load_data()
@@ -197,15 +213,14 @@ def main():
 
     print(f"Running {len(configs)} pipeline configuration(s) against {len(test_set)} test questions...\n")
 
-    results = []
-    for i, config in enumerate(configs, start=1):
-        print(f"[{i}/{len(configs)}] {config.as_dict()}")
-        try:
-            result = run_single_config(config, documents, test_set, args.judge, args.skip_generation)
-            results.append(result)
-        except Exception as e:
-            print(f"  FAILED: {e}")
+    all_results = run_sweep(configs, documents, test_set, args.judge, args.skip_generation)
+    for i, r in enumerate(all_results, start=1):
+        if "error" in r:
+            print(f"[{i}/{len(all_results)}] {r['config']}\n  FAILED: {r['error']}")
+        else:
+            print(f"[{i}/{len(all_results)}] {r['config']}")
 
+    results = [r for r in all_results if "error" not in r]
     if not results:
         print("\nAll configs failed — see errors above.")
         return
